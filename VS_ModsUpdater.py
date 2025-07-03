@@ -168,43 +168,6 @@ class MajScript:
         # system
         self.my_os = platform.system()
 
-    def check_update_script(self):
-        # Scrap pour recuperer la derniere version en ligne du script
-        if self.my_os == "Windows":
-            url_script = 'https://mods.vintagestory.at/modsupdater#tab-files'
-        elif self.my_os == 'Linux':
-            url_script = 'https://mods.vintagestory.at/modsupdaterforlinux#tab-files'
-        else:
-            url_script = ''
-        req_url_script = urllib.request.Request(url_script)
-        try:
-            urllib.request.urlopen(req_url_script)
-            req_page_url = requests.get(url_script, timeout=2)
-            page = req_page_url.content
-            soup = BeautifulSoup(page, features="html.parser")
-            soup_changelog = soup.find("div", {"class": "changelogtext"})
-            soup_link_prg = soup.find("a", {"class": "downloadbutton"})
-            # on recupere la version du chanlog
-            regexp_online_ver_modsupdater = '<strong>v(.*)</strong>'
-            online_ver_modsupdater = re.search(regexp_online_ver_modsupdater,
-                                               str(soup_changelog))
-            # On compare les versions
-            result = VSUpdate.compversion_local(__version__, online_ver_modsupdater[1])
-            if result == -1:
-                column, row = os.get_terminal_size()
-                maj_txt = f'[red]{LanguageChoice().existing_update}[/red]{LanguageChoice().url_mods.rstrip("/")}{soup_link_prg["href"]}'
-                lines_update = maj_txt.splitlines()
-                for line in lines_update:
-                    print(f'{line.center(column)}')
-        except requests.exceptions.ReadTimeout:
-            write_log(
-                'ReadTimeout error: Server did not respond within the specified timeout.')
-        except urllib.error.URLError as err_url:
-            # Affiche de l'erreur si le lien n'est pas valide
-            # print(f'[red]{LanguageChoice().error_msg}[/red]')  # debug
-            msg_error = f'{err_url.reason} : {url_script}'
-            write_log(msg_error)
-
 
 class VSUpdate:
     def __init__(self, pathmods):
@@ -425,11 +388,11 @@ class VSUpdate:
         if type_file == '.zip':
             # On lit le fichier modinfo.json de l'archive et on recupere le modid, name et version
             self.filepath = Path(self.path_mods, file)
-            if zipfile.is_zipfile(self.filepath):  # Vérifie si fichier est un Zip valide
-                with zipfile.ZipFile(self.filepath) as fichier_zip:
-                    with fichier_zip.open('modinfo.json') as modinfo_json:
-                        self.modinfo_content = modinfo_json.read().decode('utf-8-sig')
             try:
+                if zipfile.is_zipfile(self.filepath):  # Vérifie si fichier est un Zip valide
+                    with zipfile.ZipFile(self.filepath) as fichier_zip:
+                        with fichier_zip.open('modinfo.json') as modinfo_json:
+                            self.modinfo_content = modinfo_json.read().decode('utf-8-sig')
                 regex_name = r'"{0,1}name"{0,1} {0,}: {0,}"(.*)",{0,}'
                 result_name = re.search(regex_name, self.modinfo_content,
                                         flags=re.IGNORECASE)
@@ -452,7 +415,10 @@ class VSUpdate:
                     mod_description = result_description.group(1)
                 else:
                     mod_description = ''
-            except Exception:
+            except Exception as ex:
+                print(f"Error trying to get modinfo from {file}:")
+                print(ex)
+
                 try:
                     json_correct = self.json_correction(self.modinfo_content)
                     mod_name = json_correct[0]
@@ -600,13 +566,13 @@ class VSUpdate:
             req_page_url = requests.get(url, timeout=5)
             page = req_page_url.content
             soup = BeautifulSoup(page, features="html.parser")
-            soup_full_changelog = soup.find("div", {"class": "changelogtext"})
+            soup_full_changelog = soup.find("table", {"class": "release-table"})
             # version
-            last_version = soup_full_changelog.find('strong').text
+            last_version = soup_full_changelog.find('td').text.strip()
             # On regarde si formatage par <ul></ul>
-            balise_ul = soup_full_changelog.find("li")
-            if balise_ul is not None:
-                lst_log_desc.append(balise_ul.text)
+            cl_td = soup_full_changelog.find('td', {"class": "cl-changelog"})
+            if cl_td is not None:
+                lst_log_desc.append(cl_td.text.lstrip())
             else:
                 # recherche des paragraphes, on remplace les balises <br>, </br>, <br/> par un saut de ligne \n
                 regexp_br = r'</{0,1}br/{0,1}>'
@@ -657,13 +623,6 @@ class VSUpdate:
         lines01 = txt_title01.splitlines()
         for line in lines01:
             print(line.center(column))
-        # On vérifie si une version plus récente du script est en ligne
-        maj_script = MajScript()
-        maj_script.check_update_script()
-        txt_title02 = f'\n[cyan]{LanguageChoice().title2} : [bold]{self.version}[/bold][/cyan]\n'
-        lines02 = txt_title02.splitlines()
-        for line in lines02:
-            print(f'{line.center(column)}')
         print('\n')
 
     def mods_exclusion(self):
@@ -747,7 +706,8 @@ class VSUpdate:
                     mod_game_versions = resp_dict['mod']['releases'][0]['tags']
                     first_min_ver = None
                     for ver in mod_game_versions:
-                        first_min_ver = ver.split('v', 1)[1]
+                        #first_min_ver = ver.split('v', 1)[1]
+                        first_min_ver = ver
                     result_compversion_local = self.compversion_local(
                         self.normalize_version(self.version_locale),
                         self.normalize_version(self.mod_last_version_online))  # (version locale, version online)
@@ -798,6 +758,7 @@ class VSUpdate:
             except Exception:
                 msg = f'{modname_value}\n{traceback.format_exc()}'
                 write_log(msg)
+                print(msg)
 
     def resume(self):
         # Résumé de la maj
